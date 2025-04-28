@@ -1,4 +1,4 @@
-# Corretor de Redações ENEM com RAG
+# Corretor de Redações com RAG
 
 Este sistema utiliza Inteligência Artificial com RAG (Retrieval-Augmented Generation) para analisar, corrigir e atribuir notas a redações no estilo ENEM. O sistema avalia as cinco competências do ENEM, fornece feedback detalhado e sugere melhorias específicas.
 
@@ -18,7 +18,7 @@ Este sistema utiliza Inteligência Artificial com RAG (Retrieval-Augmented Gener
 ## Tecnologias utilizadas
 
 - **RAG (Retrieval-Augmented Generation)**: Para recuperar conhecimento específico sobre redações ENEM
-- **FAISS**: Como banco de dados vetorial para armazenar e recuperar informações
+- **ChromaDB**: Como banco de dados vetorial para armazenar e recuperar informações
 - **Anthropic Claude 3.5 Haiku**: Para análise e geração de feedback
 - **OpenAI GPT-4o-mini**: Alternativa para análise e geração de feedback
 - **Streamlit**: Para a interface web
