@@ -1,0 +1,13 @@
+# Substitua faiss-cpu por chromadb
+streamlit==1.33.0
+pandas==2.2.1
+chromadb==0.4.24  
+langchain==0.1.11
+langchain-community>=0.0.25,<0.1
+python-dotenv==1.0.1
+openai==1.28.1
+anthropic==0.18.1
+docling
+nltk==3.8.1
+numpy==1.26.4
+matplotlib==3.8.3

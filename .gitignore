@@ -1,0 +1,29 @@
+# Ambiente
+.env
+.venv
+env/
+venv/
+ENV/
+**pycache**/
+*.py[cod]
+
+# Cache do Python
+**pycache**/
+*.py[cod]
+*$py.class
+
+# Vector store do ChromaDB
+chroma_db/
+.chroma/
+chromadb/
+chromadb_data/
+vector_store/
+
+# Arquivos temporários
+.tmp/
+temp/
+tmp/
+
+# Logs
+logs/
+*.log
