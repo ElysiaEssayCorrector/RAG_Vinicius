@@ -151,7 +151,7 @@ def identificar_repertorio_sociocultural(texto):
         r'([0-9]+%)',  # Porcentagens
         r'([0-9]+\s*(?:de cada|em cada)\s*[0-9]+)',  # "X de cada Y"
         r'"([^"]+)"',  # Citações entre aspas
-        r''([^'']+)'',  # Citações entre aspas simples
+        r"'([^']+)'",  # Citações entre aspas simples (CORRIGIDO)
         r'lei(?:\s+n[°º]?\s*[0-9.]+)',  # Menções a leis
         r'(?:constituição|carta magna)',  # Menções à Constituição
         r'(?:onu|unesco|unicef|oms|ibge)',  # Menções a organizações
@@ -213,3 +213,40 @@ def carregar_avaliacao(filepath):
         avaliacao = json.load(f)
     
     return avaliacao
+
+def otimizar_prompt(redacao_text, max_tokens=4000):
+    """
+    Otimiza o texto da redação para economizar tokens
+    
+    Args:
+        redacao_text: Texto da redação
+        max_tokens: Número máximo de tokens
+        
+    Returns:
+        Texto otimizado
+    """
+    # Estimativa básica de tokens (aproximadamente 4 caracteres por token)
+    tokens_estimados = len(redacao_text) / 4
+    
+    # Se estiver dentro do limite, retornar como está
+    if tokens_estimados <= max_tokens:
+        return redacao_text
+    
+    # Caso contrário, reduzir preservando introdução e conclusão
+    introducao = extrair_introducao(redacao_text)
+    conclusao = extrair_conclusao(redacao_text)
+    
+    # Extrair desenvolvimento e reduzir se necessário
+    desenvolvimento = redacao_text[len(introducao):len(redacao_text)-len(conclusao)]
+    
+    # Reduzir desenvolvimento para caber nos tokens disponíveis
+    tokens_disponiveis = max_tokens - (len(introducao) + len(conclusao)) / 4
+    chars_desenvolvimento = int(tokens_disponiveis * 4)
+    
+    if len(desenvolvimento) > chars_desenvolvimento:
+        # Preservar início e fim do desenvolvimento
+        metade = chars_desenvolvimento // 2
+        desenvolvimento_reduzido = desenvolvimento[:metade] + "..." + desenvolvimento[-metade:]
+        return introducao + desenvolvimento_reduzido + conclusao
+    
+    return redacao_text

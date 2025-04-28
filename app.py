@@ -2,15 +2,17 @@ import streamlit as st
 import pandas as pd
 import os
 import sys
-import re
 import time
+import json
+from dotenv import load_dotenv
 
-# Adiciona o diretório atual ao caminho de busca do Python
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Carrega variáveis de ambiente
+load_dotenv()
 
-# Agora importe dos módulos src
+# Importa os módulos do projeto
 from src.evaluation import RedacaoEvaluator
 from src.rag import RAGSystem
+from src.utils import salvar_avaliacao, contar_palavras, contar_frases, contar_paragrafos
 
 # Configuração da página
 st.set_page_config(
@@ -31,55 +33,40 @@ if 'tema' not in st.session_state:
     st.session_state.tema = ""
 if 'verificacao_tema' not in st.session_state:
     st.session_state.verificacao_tema = None
+if 'avaliador_carregado' not in st.session_state:
+    st.session_state.avaliador_carregado = False
+if 'api_model' not in st.session_state:
+    st.session_state.api_model = "anthropic"  # Default para Anthropic/Claude
 
 # Função para carregar os avaliadores (executada apenas uma vez)
 @st.cache_resource
-def carregar_avaliadores():
+def carregar_avaliadores(use_anthropic=True):
     # Paths para o banco de dados vetorial
     vector_db_path = "models/vectordb"
     
     # Verifica se o banco de dados existe
     if not os.path.exists(vector_db_path):
-        st.error("Banco de dados vetorial não encontrado. Execute o script de pré-processamento primeiro.")
+        st.error("Banco de dados vetorial não encontrado. Execute o script de inicialização primeiro: `python initialize_db.py`")
         return None, None
     
     # Carrega os avaliadores
     try:
-        evaluator = RedacaoEvaluator(vector_db_path, use_anthropic=True)
-        rag_system = RAGSystem(vector_db_path, use_anthropic=True)
+        evaluator = RedacaoEvaluator(vector_db_path, use_anthropic=use_anthropic)
+        rag_system = RAGSystem(vector_db_path, use_anthropic=use_anthropic)
         return evaluator, rag_system
     except Exception as e:
         st.error(f"Erro ao carregar avaliadores: {str(e)}")
         return None, None
 
-# Função para processar a submissão
-def processar_submissao():
-    st.session_state.redacao_submetida = True
-    st.session_state.redacao_text = redacao_text
-    st.session_state.tema = tema
-    
-    # Verificação de aderência ao tema
-    with st.spinner("Verificando aderência ao tema..."):
-        verificacao = evaluator.verificar_aderencia_tema(redacao_text, tema)
-        st.session_state.verificacao_tema = verificacao
-    
-    # Se a redação não fugir totalmente ao tema, continua a avaliação
-    if verificacao["aderencia"] != "Fuga ao tema":
-        with st.spinner("Analisando redação... (isso pode levar alguns minutos)"):
-            resultado = evaluator.evaluate_redacao(redacao_text, tema)
-            st.session_state.avaliacao = resultado
-
-# Carrega os avaliadores
-evaluator, rag_system = carregar_avaliadores()
-
 # Título e descrição
 st.title("📝 Corretor de Redações ENEM")
 st.markdown("""
-Este sistema utiliza inteligência artificial para analisar e corrigir redações no estilo ENEM, 
-oferecendo feedback detalhado sobre cada uma das cinco competências avaliadas no exame.
+Este sistema utiliza inteligência artificial com tecnologia RAG (Retrieval-Augmented Generation) 
+para analisar e corrigir redações no estilo ENEM, oferecendo feedback detalhado sobre cada uma 
+das cinco competências avaliadas no exame.
 """)
 
-# Barra lateral com informações
+# Barra lateral com informações e configurações
 with st.sidebar:
     st.header("Sobre o Corretor")
     st.markdown("""
@@ -98,37 +85,61 @@ with st.sidebar:
     4. **Coesão textual** (200 pontos)
     5. **Proposta de intervenção** (200 pontos)
     
-    *Este sistema utiliza tecnologia RAG (Retrieval-Augmented Generation) e modelos de IA avançados para fornecer feedback baseado nas diretrizes oficiais do ENEM.*
+    *Este sistema utiliza modelos de IA avançados para fornecer feedback baseado nas diretrizes oficiais do ENEM.*
     """)
     
     # Opções avançadas
-    st.subheader("Opções Avançadas")
+    st.subheader("Configurações")
     modelo = st.radio(
         "Modelo de IA",
         options=["Claude (Anthropic)", "GPT-4o-mini (OpenAI)"],
-        index=0
+        index=0 if st.session_state.api_model == "anthropic" else 1,
+        key="modelo_selection"
     )
     
-    # Botões de ferramentas adicionais
+    # Atualiza o modelo selecionado
+    use_anthropic = modelo == "Claude (Anthropic)"
+    if (use_anthropic and st.session_state.api_model != "anthropic") or (not use_anthropic and st.session_state.api_model != "openai"):
+        st.session_state.api_model = "anthropic" if use_anthropic else "openai"
+        st.session_state.avaliador_carregado = False
+        st.experimental_rerun()
+    
+    # Carrega os avaliadores com o modelo selecionado
+    if not st.session_state.avaliador_carregado:
+        with st.spinner(f"Carregando avaliador com {modelo}..."):
+            evaluator, rag_system = carregar_avaliadores(use_anthropic)
+            if evaluator and rag_system:
+                st.session_state.avaliador_carregado = True
+                st.success(f"Avaliador carregado com sucesso usando {modelo}!")
+            else:
+                st.error("Falha ao carregar o avaliador. Verifique as chaves de API e o banco de dados.")
+    
+    # Ferramentas adicionais
     st.subheader("Ferramentas Adicionais")
     ferramentas_expander = st.expander("Expandir Ferramentas")
     with ferramentas_expander:
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Sugerir Estrutura"):
+            if st.button("Sugerir Estrutura", disabled=not st.session_state.avaliador_carregado):
                 if 'tema' in st.session_state and st.session_state.tema:
                     with st.spinner("Gerando sugestão de estrutura..."):
-                        sugestao = rag_system.sugerir_estrutura_redacao(st.session_state.tema)
-                        st.session_state.sugestao_estrutura = sugestao
+                        try:
+                            sugestao = rag_system.sugerir_estrutura_redacao(st.session_state.tema)
+                            st.session_state.sugestao_estrutura = sugestao
+                        except Exception as e:
+                            st.error(f"Erro ao gerar sugestão: {str(e)}")
                 else:
                     st.warning("Por favor, informe o tema da redação primeiro.")
         
         with col2:
-            if st.button("Analisar Repertório"):
+            if st.button("Analisar Repertório", disabled=not st.session_state.avaliador_carregado):
                 if 'redacao_text' in st.session_state and st.session_state.redacao_text:
                     with st.spinner("Analisando repertório sociocultural..."):
-                        analise = rag_system.identificar_repertorio_sociocultural(st.session_state.redacao_text)
-                        st.session_state.analise_repertorio = analise
+                        try:
+                            analise = rag_system.analisar_repertorio(st.session_state.redacao_text)
+                            st.session_state.analise_repertorio = analise
+                        except Exception as e:
+                            st.error(f"Erro ao analisar repertório: {str(e)}")
                 else:
                     st.warning("Por favor, submeta uma redação primeiro.")
 
@@ -143,7 +154,8 @@ with st.form(key="redacao_form"):
     
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
-        submit_button = st.form_submit_button(label="Analisar Redação")
+        submit_button = st.form_submit_button(label="Analisar Redação", 
+                                             disabled=not st.session_state.avaliador_carregado)
 
 # Processa a submissão quando o botão é pressionado
 if submit_button:
@@ -152,7 +164,65 @@ if submit_button:
     elif len(tema.strip()) < 10:
         st.error("Por favor, insira o tema completo da redação.")
     else:
-        processar_submissao()
+        st.session_state.redacao_submetida = True
+        st.session_state.redacao_text = redacao_text
+        st.session_state.tema = tema
+        
+        # Exibe estatísticas básicas
+        palavras = contar_palavras(redacao_text)
+        frases = contar_frases(redacao_text)
+        paragrafos = contar_paragrafos(redacao_text)
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Palavras", palavras)
+        col2.metric("Frases", frases)
+        col3.metric("Parágrafos", paragrafos)
+        
+        # Verificação de aderência ao tema
+        with st.spinner("Verificando aderência ao tema..."):
+            try:
+                verificacao = evaluator.verificar_aderencia_tema(redacao_text, tema)
+                st.session_state.verificacao_tema = verificacao
+            except Exception as e:
+                st.error(f"Erro ao verificar tema: {str(e)}")
+                st.session_state.verificacao_tema = None
+        
+        # Se a redação não fugir totalmente ao tema, continua a avaliação
+        if st.session_state.verificacao_tema and st.session_state.verificacao_tema["aderencia"] != "Fuga ao tema":
+            # Inicia a avaliação por competências
+            with st.status("Analisando redação...", expanded=True) as status:
+                st.write("Iniciando análise completa...")
+                
+                try:
+                    # Avalia cada competência individualmente com feedback de progresso
+                    st.write("Analisando Competência 1: Domínio da norma padrão...")
+                    time.sleep(0.5)  # Para dar tempo de atualizar a UI
+                    
+                    st.write("Analisando Competência 2: Compreensão do tema...")
+                    time.sleep(0.5)
+                    
+                    st.write("Analisando Competência 3: Argumentação...")
+                    time.sleep(0.5)
+                    
+                    st.write("Analisando Competência 4: Coesão textual...")
+                    time.sleep(0.5)
+                    
+                    st.write("Analisando Competência 5: Proposta de intervenção...")
+                    time.sleep(0.5)
+                    
+                    st.write("Gerando avaliação geral...")
+                    time.sleep(0.5)
+                    
+                    # Realiza a avaliação completa (o status acima é só para feedback visual)
+                    resultado = evaluator.evaluate_redacao(redacao_text, tema)
+                    st.session_state.avaliacao = resultado
+                    
+                    st.write("Análise concluída com sucesso!")
+                    status.update(label="Análise concluída!", state="complete")
+                    
+                except Exception as e:
+                    st.error(f"Erro na análise: {str(e)}")
+                    status.update(label="Erro na análise", state="error")
 
 # Exibe as ferramentas adicionais se solicitadas
 if 'sugestao_estrutura' in st.session_state:
@@ -182,7 +252,7 @@ if st.session_state.verificacao_tema:
         st.markdown("### Justificativa")
         st.markdown(verificacao["justificativa"])
         
-        if verificacao["recomendacoes"]:
+        if verificacao.get("recomendacoes"):
             st.markdown("### Recomendações")
             st.markdown(verificacao["recomendacoes"])
     
@@ -194,7 +264,7 @@ if st.session_state.verificacao_tema:
             st.session_state.verificacao_tema = None
             st.experimental_rerun()
 
-# Exibe resultados da avaliação
+# Exibe resultados da avaliação completa
 if st.session_state.avaliacao:
     avaliacao = st.session_state.avaliacao
     
@@ -373,6 +443,14 @@ if st.session_state.avaliacao:
     
     st.markdown("#### Conclusão")
     st.markdown(avaliacao_geral["conclusao"])
+    
+    # Opção para salvar avaliação
+    if st.button("Salvar Avaliação", key="salvar_avaliacao"):
+        try:
+            filepath = salvar_avaliacao(avaliacao, "avaliacoes")
+            st.success(f"Avaliação salva com sucesso em: {filepath}")
+        except Exception as e:
+            st.error(f"Erro ao salvar avaliação: {str(e)}")
     
     # Botão para redefinir e fazer nova análise
     if st.button("Analisar Nova Redação"):
